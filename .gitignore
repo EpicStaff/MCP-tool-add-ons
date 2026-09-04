@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environments
+.venv/
+venv/
+.uv/
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Never commit the extraction archive
+*.zip
+
+# browser_use_with_cua runtime state
+runs/
+sessions/
+*.vncpass
+.vncpass
+
+# Playwright / browser artifacts
+ms-playwright/
+videos/
+traces/
+screenshots/
+*.webm
+extracted_content_*.md
+
+# Editors
+.idea/
+.vscode/
