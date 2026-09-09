@@ -1,63 +1,81 @@
 # Computer Interaction Tools
 
+Three MCP tools that let an agent act on a real environment: run CLI commands, drive a browser, or operate a full desktop GUI.
+
+| Tool | Container(s) | Port | Underlying tech |
+|---|---|---|---|
+| **CLI Tool** | `cli_open_interpreter` | `7001` | Open Interpreter |
+| **Browser Tool** | `browser_open_interpreter` | `7002` | Open Interpreter + Playwright/Chromium |
+| **GUI Tool** | `open_computer_use` + `desktop` | `7003` | os-computer-use agent + Ubuntu desktop sandbox |
+
+**Contents:** [Setup](#setup) · [Ports](#ports) · [Access](#access) · [Functionality](#functionality) · [Notes](#notes--safety)
+
+---
+
 ## Setup
-1. Copy the template env file:
 
-~~~bash
+**1. Copy the template env file:**
+
+```bash
 cp template.env .env
-~~~
+```
 
-2. Fill in this fields in .env file with actual info
+**2. Fill in these fields in `.env` with actual info:**
 
-~~~text
+```text
 API_KEY=<your_api_key>
 LLM_MODEL=<your_llm_choice>
-~~~
+```
 
-`API_KEY` and `LLM_MODEL` are shared by the CLI and Browser tools (Open Interpreter). The GUI Tool (`open_computer_use`) is configured separately via the `OCU_*` variables in `template.env` (grounding/vision/action provider and model, defaulted to `showui`/`deepseek`) and reuses the same `API_KEY`.
+> `API_KEY` and `LLM_MODEL` are shared by the **CLI** and **Browser** tools (Open Interpreter). The **GUI Tool** (`open_computer_use`) is configured separately via the `OCU_*` variables already present in `template.env` — grounding/vision/action provider and model, defaulted to `showui`/`deepseek`, plus `OCU_DESKTOP_NOVNC_PORT` (`6081`) pointing at the `desktop` sandbox's noVNC port — and reuses the same `API_KEY`.
 
-3. Navigate to the `computer_interaction_tools` folder and start the server:
+**3. Navigate to the `computer_interaction_tools` folder and start the server(s):**
 
-~~~bash
+```bash
+# Everything
 docker compose up --build
-~~~
+```
 
-or
+| Want just... | Run |
+|---|---|
+| CLI tool | `docker compose up cli_open_interpreter --build` |
+| Browser Use tool | `docker compose up browser_open_interpreter --build` |
+| GUI Tool | `docker compose up desktop --build`<br>`docker compose up open_computer_use --build` |
 
-For CLI tool only
-~~~bash
-docker compose up cli_open_interpreter --build
-~~~
-
-For Browser Use tool only
-~~~bash
-docker compose up browser_open_interpreter --build
-~~~
-
-
-For GUI Tool Only
-~~~bash
-docker compose up desktop --build
-docker compose up open_computer_use --build
-~~~
 ---
 
 ## Ports
-After startup, this ports are exposed:  
 
-- `7001` – CLI tool API
-- `7002` - Browser Use tool API
-- `7003` - GUI Tool API
-- `6080` - VNC server for browser GUI (Browser tool)
+After startup, these ports are exposed:
+
+| Port | Purpose |
+|---|---|
+| `7001` | CLI tool API |
+| `7002` | Browser Use tool API |
+| `7003` | GUI Tool API |
+| `6080` | noVNC for the **Browser** tool (`browser_open_interpreter`) — `http://127.0.0.1:6080/vnc.html` |
+| `5900` | Raw VNC for the **Browser** tool |
+| `6081` | noVNC for the **GUI** tool's desktop sandbox (`desktop`) — `http://127.0.0.1:6081/vnc.html` |
+| `5901` | Raw VNC for the **GUI** tool's desktop sandbox |
+
+> `browser_open_interpreter` and `desktop` each run their own VNC/noVNC stack, so they're mapped to distinct host ports (`5900`/`6080` vs `5901`/`6081`) to avoid a `port is already allocated` conflict when both are started together (e.g. via `docker compose up --build`).
+
 ---
 
 ## Access
 
-- **HTTP requests:** You can send manual requests via:
+### HTTP requests
 
-**CLI tool request:**
-~~~bash
-curl -N -X POST http://localhost:7001/mcp   -H "Content-Type: application/json"   -H "Accept: application/json, text/event-stream"   -d '{
+Send manual requests directly to each tool's MCP endpoint:
+
+<details>
+<summary><b>CLI tool request</b></summary>
+
+```bash
+curl -N -X POST http://localhost:7001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
@@ -71,10 +89,17 @@ curl -N -X POST http://localhost:7001/mcp   -H "Content-Type: application/json" 
     },
     "id": 1
   }'
-~~~
-**Browser Use tool request:**
-~~~bash
-curl -N -X POST http://localhost:7002/mcp   -H "Content-Type: application/json"   -H "Accept: application/json, text/event-stream"   -d '{
+```
+</details>
+
+<details>
+<summary><b>Browser Use tool request</b></summary>
+
+```bash
+curl -N -X POST http://localhost:7002/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
@@ -88,11 +113,17 @@ curl -N -X POST http://localhost:7002/mcp   -H "Content-Type: application/json" 
     },
     "id": 1
   }'
-~~~
+```
+</details>
 
-**GUI Tool request:**
-~~~bash
-curl -N -X POST http://localhost:7003/mcp   -H "Content-Type: application/json"   -H "Accept: application/json, text/event-stream"   -d '{
+<details>
+<summary><b>GUI Tool request</b></summary>
+
+```bash
+curl -N -X POST http://localhost:7003/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
@@ -106,18 +137,21 @@ curl -N -X POST http://localhost:7003/mcp   -H "Content-Type: application/json" 
     },
     "id": 1
   }'
-~~~
+```
+</details>
 
-**Python example (as custom tool in UI):**
+### Python example (as a custom tool in the EpicStaff UI)
 
-If working on Linux you'll need to additionally add this lines to sandbox in src/docker-compose.yaml:
-~~~bash
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-~~~
-**CLI tool:**
-Python code for tool
-~~~python
+> On Linux you'll need to additionally add this to the sandbox in `src/docker-compose.yaml`:
+> ```yaml
+> extra_hosts:
+>   - "host.docker.internal:host-gateway"
+> ```
+
+<details>
+<summary><b>CLI tool</b> — Python client + input schema</summary>
+
+```python
 import asyncio
 import json
 from fastmcp import Client
@@ -159,10 +193,11 @@ def main(command: str, context: str = None):
     result = loop.run_until_complete(call_cli_tool(command, context))
     loop.close()
     return result
-~~~
+```
 
-Input Description
-~~~json
+Input description:
+
+```json
 {
   "properties": {
     "command": {
@@ -178,11 +213,13 @@ Input Description
     "command"
   ]
 }
-~~~
+```
+</details>
 
-**Browser Use tool:**
-Python code for tool
-~~~python
+<details>
+<summary><b>Browser Use tool</b> — Python client + input schema</summary>
+
+```python
 import asyncio
 import json
 from fastmcp import Client
@@ -224,11 +261,37 @@ def main(context: str, instructions: list):
     result = loop.run_until_complete(call_browser_tool(context, instructions))
     loop.close()
     return result
-~~~
+```
 
-**GUI Tool:**
-Python code for tool
-~~~python
+Input description:
+
+```json
+{
+  "properties": {
+    "context": {
+      "type": "string",
+      "description": "High-level context or objective of the browser session (e.g., 'Check Python website functionality')"
+    },
+    "instructions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ordered list of instructions the browser tool must perform"
+    }
+  },
+  "required": [
+    "context",
+    "instructions"
+  ]
+}
+```
+</details>
+
+<details>
+<summary><b>GUI Tool</b> — Python client + input schema</summary>
+
+```python
 import asyncio
 import json
 from fastmcp import Client
@@ -270,10 +333,11 @@ def main(context: str, instructions: list):
     result = loop.run_until_complete(call_gui_tool(context, instructions))
     loop.close()
     return result
-~~~
+```
 
-Input Description
-~~~json
+Input description:
+
+```json
 {
   "properties": {
     "context": {
@@ -293,31 +357,37 @@ Input Description
     "instructions"
   ]
 }
-~~~
+```
+</details>
+
 ---
 
 ## Functionality
-**CLI Tool**
+
+### CLI Tool
 - Converts natural-language instructions into shell commands or Python code
 - Executes commands and returns output and errors
 
-**Browser Tool**
+### Browser Tool
 - Automates browser interactions in headful mode
 - Executes a sequence of instructions
-- GUI available at http://127.0.0.1:6080/vnc.html
-- Browser is persistant within single tool call. New call - fresh browser
+- GUI available at `http://127.0.0.1:6080/vnc.html`
+- Browser is persistent within a single tool call — a new call starts a fresh browser
 
-**GUI Tool**
-- Automates interactions with Ubuntu system in desktop sandbox
+### GUI Tool
+- Automates interactions with an Ubuntu system in a desktop sandbox
 - Executes a sequence of instructions
-- GUI available at http://127.0.0.1:6080/vnc.html
-- Desktop sandbox should be launched separately and works until stoped by the user
-- Every tool call will use same desktop instance
+- GUI available at `http://127.0.0.1:6081/vnc.html`
+- Desktop sandbox should be launched separately and runs until stopped by the user
+- Every tool call uses the same desktop instance
 
-# Notes
+---
 
-These tools do **not have any guardrails** regarding the code they execute. All commands are executed automatically, without any confirmation.
+## Notes — Safety
 
-While the tools are containerized, they **can still modify or delete files within the container, interact with the network, or use any credentials provided**.
-
-Be careful with what you ask the agent to do. These tools **can and will execute destructive commands** if instructed to do so.
+> [!WARNING]
+> These tools do **not have any guardrails** regarding the code they execute. All commands are executed automatically, without any confirmation.
+>
+> While the tools are containerized, they **can still modify or delete files within the container, interact with the network, or use any credentials provided**.
+>
+> Be careful with what you ask the agent to do. These tools **can and will execute destructive commands** if instructed to do so.
