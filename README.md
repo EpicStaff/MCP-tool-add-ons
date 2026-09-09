@@ -1,8 +1,8 @@
 # EpicStaff MCP Tools add-ons
 
-Two standalone [MCP](https://modelcontextprotocol.io) servers extracted from the EpicStaff monorepo's `src/tool/custom_tools/`, which has since been deleted from EpicStaff. Each runs as its own docker-compose stack, independent of EpicStaff's, and is reachable over HTTP by any MCP client.
+[MCP](https://modelcontextprotocol.io) servers extracted from the EpicStaff monorepo's `src/tool/custom_tools/`, which has since been deleted from EpicStaff, plus `computer_interaction_tools`, a later add-on group. Each group runs as its own docker-compose stack, independent of EpicStaff's, and is reachable over HTTP by any MCP client.
 
-Both give an LLM agent a capability it cannot have on its own: `git_tools` lets it work a pull request end to end, and `browser_use_with_cua` lets it drive a real web browser.
+Each gives an LLM agent a capability it cannot have on its own: `git_tools` lets it work a pull request end to end, `browser_use_with_cua` lets it drive a real web browser, and `computer_interaction_tools` lets it run CLI commands, drive a browser, or operate a full desktop GUI.
 
 ## What's in here
 
@@ -25,16 +25,32 @@ The browser runs **headfully** on a virtual X display (Xvfb + xfce4) inside the 
 
 See [`browser_use_with_cua/README.md`](browser_use_with_cua/README.md).
 
+### `computer_interaction_tools` — CLI, browser, and desktop GUI automation
+
+A group of **3 MCP tools**, each its own container, that let an agent act directly on a real environment instead of only reasoning about it:
+
+- **`cli_tool`** (`cli_open_interpreter`) — converts a natural-language instruction into shell commands or Python code via [Open Interpreter](https://github.com/OpenInterpreter/open-interpreter) and returns stdout/stderr/exit code.
+- **`browser_tool`** (`browser_open_interpreter`) — runs an ordered list of natural-language instructions against a real, headful Chromium browser (Playwright, on a virtual X display); the session is watchable live over noVNC and stays open across the instructions of one call.
+- **`computer_use_tool`** (`open_computer_use`) — runs an ordered list of natural-language instructions against a full Ubuntu desktop (keyboard, mouse, shell, screenshots), also watchable over noVNC. It drives a separate **`desktop`** sandbox container that must be started alongside it and persists across tool calls until stopped.
+
+None of these tools have guardrails: commands run automatically with no confirmation step, and — even though containerized — they can modify or delete files, reach the network, or use any credentials handed to them. Treat them as you would direct shell access.
+
+See [`computer_interaction_tools/computer_interaction_mcp_tools.md`](computer_interaction_tools/computer_interaction_mcp_tools.md) for setup, ports, curl/Python call examples, and the full safety notes.
+
 ## Services
 
 | Service | Entrypoint | Transport | Container port | Published | MCP URL |
 |---|---|---|---|---|---|
 | `git_tools` | `server.py` | http | 8000 | 8082 | `http://localhost:8082/mcp` |
 | `browser_use_with_cua` | `fast_mcp_server.py` | streamable-http | 8080 | 8080 | `http://localhost:8080/mcp` |
+| `cli_open_interpreter` | `cli_mcp.py` | http | 7001 | 7001 | `http://localhost:7001/mcp` |
+| `browser_open_interpreter` | `browser_mcp.py` | http | 7002 | 7002 | `http://localhost:7002/mcp` |
+| `open_computer_use` | `computer_use_mcp.py` | http | 7003 | 7003 | `http://localhost:7003/mcp` |
+| `desktop` | — (VNC sandbox, no MCP endpoint) | — | 8080 / 5900 | 6081 / 5901 | — |
 
-`browser_use_with_cua` also publishes `5900` for VNC.
+`browser_use_with_cua` also publishes `5900` for VNC. `browser_open_interpreter` also publishes `5900` (VNC) and `6080` (noVNC); `desktop` publishes `5901` (VNC) and `6081` (noVNC) — kept on different host ports from `browser_open_interpreter` so both can run at once without a port clash.
 
-Each service is started on its own: `cd <service> && docker compose up -d`. There is no top-level compose file.
+Each service is started on its own: `cd <service> && docker compose up -d`. There is no top-level compose file — **except** `computer_interaction_tools`, whose four containers (`cli_open_interpreter`, `browser_open_interpreter`, `open_computer_use`, `desktop`) share one `docker-compose.yaml` and are typically started together with `cd computer_interaction_tools && docker compose up --build` (each can still be started individually — see its own README).
 
 ## Connecting to EpicStaff
 
@@ -51,7 +67,7 @@ Fields on each row:
 | `auth_secret_id` | Optional; resolves through EpicStaff Secrets. |
 | `init_timeout` | Default `10`. |
 
-`transport` is a **URL string** (max 2048 chars), not an enum. It is handed straight to `fastmcp.Client`, which infers the transport from the value. There are no command / args / env fields, so **stdio servers cannot be configured from the UI** — only remote HTTP/SSE URLs. Both services here are HTTP.
+`transport` is a **URL string** (max 2048 chars), not an enum. It is handed straight to `fastmcp.Client`, which infers the transport from the value. There are no command / args / env fields, so **stdio servers cannot be configured from the UI** — only remote HTTP/SSE URLs. All services here are HTTP.
 
 There is no test-connection button, no refresh-tools action, and no auto-discovery. Every tool is entered by hand.
 
@@ -83,6 +99,14 @@ run_browser_use
 restart_browser_use
 ```
 
+`computer_interaction_tools` needs 3, one per container, each with its own `transport`:
+
+```
+cli_tool
+browser_tool
+computer_use_tool
+```
+
 ### Networking
 
 EpicStaff and these tools are **separate docker-compose projects on separate networks**. Typing `http://localhost:8082/mcp` into the EpicStaff UI resolves *inside the EpicStaff container*, where nothing is listening — it will fail.
@@ -104,10 +128,12 @@ That does not line up with what these services actually do:
 
 - **`git_tools`** never reads request headers. Its `token` is a per-call **tool argument**, so the Secret path does nothing for it today and the token travels through the model's tool-call arguments.
 - **`browser_use_with_cua`** has no auth at all. Anyone who can reach port `8080` gets remote browser control, and port `5900` is a full desktop behind only `VNC_PASS`.
+- **`computer_interaction_tools`** has no auth either, and no `auth_secret_id`-style path at all — `API_KEY`/`LLM_MODEL` (and the GUI tool's `OCU_*` model settings) are container-side env vars, not per-call credentials. Anyone who can reach `7001`–`7003` gets unrestricted CLI/browser/desktop control, and the noVNC ports (`6080`, `6081`) have no password.
 
-Do not expose either beyond a trusted network. Both are noted here as follow-ups, not fixed in this checkpoint.
+Do not expose any of these beyond a trusted network. All are noted here as follow-ups, not fixed in this checkpoint.
 
 ## Repository layout
 
 - `git_tools/` — GitHub/GitLab pull-request and release MCP server.
 - `browser_use_with_cua/` — headful browser-automation MCP server with VNC.
+- `computer_interaction_tools/` — CLI, browser, and desktop-GUI computer-interaction MCP servers, plus the `desktop` sandbox container the GUI tool drives.
